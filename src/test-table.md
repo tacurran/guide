@@ -238,19 +238,50 @@ for multiple inputs/outputs to a system.
 
 ## Parallel Tests
 
-Parallel tests, like some specialized loops (for example, those that spawn
-goroutines or capture references as part of the loop body),
-must take care to explicitly assign loop variables within the loop's scope to
-ensure that they hold the expected values.
+Go 1.22 gives each iteration of a `for` statement its own loop variables
+([Go 1.22 release notes](https://go.dev/doc/go1.22#language),
+[spec](https://go.dev/ref/spec#Go_1.22)).
+The language paragraph in those notes does not cite an issue number.
+The change was previewed in Go 1.21
+([Go 1.21 release notes](https://go.dev/doc/go1.21#language),
+[issue #57969](https://go.dev/issue/57969)).
+
+A `t.Parallel` subtest uses the range variable directly.
+Do not redeclare it with `tt := tt`.
+The `forvar` modernizer in `go fix` deletes that redeclaration in a `range` loop.
+`go fix -json` on the bad column reports `copying variable is unneeded`
+([`forvar`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize#forvar)).
+`forvar` does not edit three-clause `for` loops.
+Table tests use `range`.
+
+Upstream deleted the redeclaration in
+[commit 0a69c1d0954093b0466ad9a1b95bbf7bef399793]
+([#254]).
+That pull request has no review comments.
+The sentences around the example still told readers to copy `tt`.
+Those sentences were the pre-1.22 rule.
+
+  [commit 0a69c1d0954093b0466ad9a1b95bbf7bef399793]: https://github.com/uber-go/guide/commit/0a69c1d0954093b0466ad9a1b95bbf7bef399793
+  [#254]: https://github.com/uber-go/guide/pull/254
+
+<table>
+<thead><tr><th>Bad</th><th>Good</th></tr></thead>
+<tbody>
+<tr><td>
 
 ```go
-tests := []struct{
-  give string
-  // ...
-}{
-  // ...
+for _, tt := range tests {
+  tt := tt
+  t.Run(tt.give, func(t *testing.T) {
+    t.Parallel()
+    // ...
+  })
 }
+```
 
+</td><td>
+
+```go
 for _, tt := range tests {
   t.Run(tt.give, func(t *testing.T) {
     t.Parallel()
@@ -259,9 +290,7 @@ for _, tt := range tests {
 }
 ```
 
-In the example above, we must declare a `tt` variable scoped to the loop
-iteration because of the use of `t.Parallel()` below.
-If we do not do that, most or all tests will receive an unexpected value for
-`tt`, or a value that changes as they're running.
+</td></tr>
+</tbody></table>
 
 <!-- TODO: Explain how to use _test packages. -->

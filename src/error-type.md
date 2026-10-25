@@ -6,6 +6,9 @@ Consider the following before picking the option best suited for your use case.
 - Does the caller need to match the error so that they can handle it?
   If yes, we must support the [`errors.Is`] or [`errors.As`] functions
   by declaring a top-level error variable or a custom type.
+  At the call site, on Go 1.26 and later, use [`errors.AsType`]
+  instead of a local `var` plus `errors.As`.
+  `go fix` rewrites that pattern.
 - Is the error message a static string,
   or is it a dynamic string that requires contextual information?
   For the former, we can use [`errors.New`], but for the latter we must
@@ -15,6 +18,7 @@ Consider the following before picking the option best suited for your use case.
 
 [`errors.Is`]: https://pkg.go.dev/errors#Is
 [`errors.As`]: https://pkg.go.dev/errors#As
+[`errors.AsType`]: https://pkg.go.dev/errors#AsType
 
 | Error matching? | Error Message | Guidance                            |
 |-----------------|---------------|-------------------------------------|
@@ -121,9 +125,8 @@ func Open(file string) error {
 // package bar
 
 if err := foo.Open("testfile.txt"); err != nil {
-  var notFound *NotFoundError
-  if errors.As(err, &notFound) {
-    // handle the error
+  if notFound, ok := errors.AsType[*NotFoundError](err); ok {
+    // handle notFound
   } else {
     panic("unknown error")
   }
@@ -132,6 +135,29 @@ if err := foo.Open("testfile.txt"); err != nil {
 
 </td></tr>
 </tbody></table>
+
+Do not match that error with a separate variable and `errors.As`.
+`go fix` rewrites this with the `errorsastype` modernizer:
+
+```go
+var notFound *NotFoundError
+if errors.As(err, &notFound) {
+  fmt.Println(notFound.File)
+}
+```
+
+`go fix -json` reports
+`errors.As can be simplified using AsType[*NotFoundError]`.
+
+[`errors.AsType`] was added in Go 1.26
+([Go 1.26 release notes](https://go.dev/doc/go1.26#errorspkgerrors)).
+That paragraph does not cite an issue number.
+`errors.As` still matches the same custom type.
+The modernizer only rewrites the local `var` plus `errors.As` pattern
+([`errorsastype`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize#errorsastype)).
+`errors.Is` and `errors.As` are the Go 1.13 matching API
+([Go 1.13 release notes](https://go.dev/doc/go1.13#error_wrapping),
+[issue #29934](https://go.dev/issue/29934)).
 
 Note that if you export error variables or types from a package,
 they will become part of the public API of the package.

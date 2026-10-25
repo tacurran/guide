@@ -27,11 +27,25 @@ resources:
 We aim for the code samples to be accurate for the two most recent minor versions
 of Go [releases](https://go.dev/doc/devel/release).
 
-All code should be error-free when run through `golint` and `go vet`. We
-recommend setting up your editor to:
+All code should be error-free when run through `revive` and `go vet`.
+We recommend setting up your editor to:
 
 - Run `goimports` on save
-- Run `golint` and `go vet` to check for errors
+- Run `revive` and `go vet` to check for errors
+
+`golint` is deprecated and frozen.
+The [golang/lint README] says so,
+and [golang/go#38968] is the freeze.
+There is no Go release note for that freeze.
+Upstream replaced `golint` with `revive` in
+[commit 860b988a94b53bb1b1f4c6ed9957e5a645f4eaff] ([#253]).
+That pull request has no review comments.
+The linter set is [Linting](lint.md).
+
+  [golang/lint README]: https://github.com/golang/lint/blob/master/README.md
+  [golang/go#38968]: https://github.com/golang/go/issues/38968
+  [commit 860b988a94b53bb1b1f4c6ed9957e5a645f4eaff]: https://github.com/uber-go/guide/commit/860b988a94b53bb1b1f4c6ed9957e5a645f4eaff
+  [#253]: https://github.com/uber-go/guide/pull/253
 
 You can find information in editor support for Go tools here:
 <https://go.dev/wiki/IDEsAndTextEditorPlugins>

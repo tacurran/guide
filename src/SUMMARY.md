@@ -18,7 +18,7 @@
     - [Handle Errors Once](error-once.md)
   - [Handle Type Assertion Failures](type-assert.md)
   - [Don't Panic](panic.md)
-  - [Use go.uber.org/atomic](atomic.md)
+  - [Use sync/atomic types](atomic.md)
   - [Avoid Mutable Globals](global-mut.md)
   - [Avoid Embedding Types in Public Structs](embed-public.md)
   - [Avoid Using Built-In Names](builtin-name.md)

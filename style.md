@@ -25,7 +25,7 @@
     - [Handle Errors Once](#handle-errors-once)
   - [Handle Type Assertion Failures](#handle-type-assertion-failures)
   - [Don't Panic](#dont-panic)
-  - [Use go.uber.org/atomic](#use-gouberorgatomic)
+  - [Use sync/atomic types](#use-syncatomic-types)
   - [Avoid Mutable Globals](#avoid-mutable-globals)
   - [Avoid Embedding Types in Public Structs](#avoid-embedding-types-in-public-structs)
   - [Avoid Using Built-In Names](#avoid-using-built-in-names)
@@ -98,11 +98,20 @@ resources:
 We aim for the code samples to be accurate for the two most recent minor versions
 of Go [releases](https://go.dev/doc/devel/release).
 
-All code should be error-free when run through `golint` and `go vet`. We
-recommend setting up your editor to:
+All code should be error-free when run through `revive` and `go vet`.
+We recommend setting up your editor to:
 
 - Run `goimports` on save
-- Run `golint` and `go vet` to check for errors
+- Run `revive` and `go vet` to check for errors
+
+`golint` is deprecated and frozen.
+The [golang/lint README](https://github.com/golang/lint/blob/master/README.md) says so,
+and [golang/go#38968](https://github.com/golang/go/issues/38968) is the freeze.
+There is no Go release note for that freeze.
+Upstream replaced `golint` with `revive` in
+[commit 860b988a94b53bb1b1f4c6ed9957e5a645f4eaff](https://github.com/uber-go/guide/commit/860b988a94b53bb1b1f4c6ed9957e5a645f4eaff) ([#253](https://github.com/uber-go/guide/pull/253)).
+That pull request has no review comments.
+The linter set is [Linting](#linting).
 
 You can find information in editor support for Go tools here:
 https://go.dev/wiki/IDEsAndTextEditorPlugins
@@ -762,6 +771,9 @@ Consider the following before picking the option best suited for your use case.
 - Does the caller need to match the error so that they can handle it?
   If yes, we must support the [`errors.Is`](https://pkg.go.dev/errors#Is) or [`errors.As`](https://pkg.go.dev/errors#As) functions
   by declaring a top-level error variable or a custom type.
+  At the call site, on Go 1.26 and later, use [`errors.AsType`](https://pkg.go.dev/errors#AsType)
+  instead of a local `var` plus `errors.As`.
+  `go fix` rewrites that pattern.
 - Is the error message a static string,
   or is it a dynamic string that requires contextual information?
   For the former, we can use [`errors.New`](https://pkg.go.dev/errors#New), but for the latter we must
@@ -871,9 +883,8 @@ func Open(file string) error {
 // package bar
 
 if err := foo.Open("testfile.txt"); err != nil {
-  var notFound *NotFoundError
-  if errors.As(err, &notFound) {
-    // handle the error
+  if notFound, ok := errors.AsType[*NotFoundError](err); ok {
+    // handle notFound
   } else {
     panic("unknown error")
   }
@@ -882,6 +893,29 @@ if err := foo.Open("testfile.txt"); err != nil {
 
 </td></tr>
 </tbody></table>
+
+Do not match that error with a separate variable and `errors.As`.
+`go fix` rewrites this with the `errorsastype` modernizer:
+
+```go
+var notFound *NotFoundError
+if errors.As(err, &notFound) {
+  fmt.Println(notFound.File)
+}
+```
+
+`go fix -json` reports
+`errors.As can be simplified using AsType[*NotFoundError]`.
+
+[`errors.AsType`](https://pkg.go.dev/errors#AsType) was added in Go 1.26
+([Go 1.26 release notes](https://go.dev/doc/go1.26#errorspkgerrors)).
+That paragraph does not cite an issue number.
+`errors.As` still matches the same custom type.
+The modernizer only rewrites the local `var` plus `errors.As` pattern
+([`errorsastype`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize#errorsastype)).
+`errors.Is` and `errors.As` are the Go 1.13 matching API
+([Go 1.13 release notes](https://go.dev/doc/go1.13#error_wrapping),
+[issue #29934](https://go.dev/issue/29934)).
 
 Note that if you export error variables or types from a package,
 they will become part of the public API of the package.
@@ -1244,14 +1278,39 @@ if err != nil {
 </td></tr>
 </tbody></table>
 
-### Use go.uber.org/atomic
+### Use sync/atomic types
 
-Atomic operations with the [sync/atomic](https://pkg.go.dev/sync/atomic) package operate on the raw types
-(`int32`, `int64`, etc.) so it is easy to forget to use the atomic operation to
-read or modify the variables.
+Use the typed values in [`sync/atomic`](https://pkg.go.dev/sync/atomic)
+(`Bool`, `Int32`, `Int64`, `Uint32`, `Uint64`, `Uintptr`, and `Pointer`)
+instead of a raw integer and a function such as `atomic.SwapInt32`.
 
-[go.uber.org/atomic](https://pkg.go.dev/go.uber.org/atomic) adds type safety to these operations by hiding the
-underlying type. Additionally, it includes a convenient `atomic.Bool` type.
+Go 1.19 added those types so the value stays hidden
+and every access goes through the atomic API
+([Go 1.19 release notes](https://go.dev/doc/go1.19#atomic_types),
+[issue #50860](https://go.dev/issue/50860)).
+
+`go fix` runs the `atomictypes` modernizer
+([Go 1.27 release notes](https://go.dev/doc/go1.27#go-fix);
+that list of new modernizers does not cite an issue number).
+`atomictypes` rewrites a variable when every use is a primitive
+`sync/atomic` call.
+An `int32` becomes `atomic.Int32`.
+It leaves the variable alone when any use is a plain read or write,
+so a race is not rewritten into a typed load
+([`atomictypes`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize#atomictypes)).
+
+A boolean flag is `atomic.Bool`, not an `int32`.
+`go.uber.org/atomic` is not required for these types.
+Its [README](https://github.com/uber-go/atomic/blob/master/README.md) still describes `sync/atomic` as raw integers
+and does not mention the Go 1.19 types.
+No commit on this file chooses that package over the standard library.
+The last edit is
+[commit 37c45b52bf9adf36ccff5db54187cdf4d45e0cc9](https://github.com/uber-go/guide/commit/37c45b52bf9adf36ccff5db54187cdf4d45e0cc9)
+([#265](https://github.com/uber-go/guide/pull/265)), a pointer typo.
+That pull request has no review comments.
+
+Follow the `atomic.Bool` example for a flag
+even when `atomictypes` is silent on the racy read.
 
 <table>
 <thead><tr><th>Bad</th><th>Good</th></tr></thead>
@@ -1259,40 +1318,83 @@ underlying type. Additionally, it includes a convenient `atomic.Bool` type.
 <tr><td>
 
 ```go
+import "sync/atomic"
+
 type foo struct {
-  running int32  // atomic
+  running int32 // atomic
 }
 
 func (f *foo) start() {
   if atomic.SwapInt32(&f.running, 1) == 1 {
-     // already running…
-     return
+    // already running…
+    return
   }
   // start the Foo
 }
 
 func (f *foo) isRunning() bool {
-  return f.running == 1  // race!
+  return f.running == 1 // race!
 }
 ```
 
 </td><td>
 
 ```go
+import "sync/atomic"
+
 type foo struct {
   running atomic.Bool
 }
 
 func (f *foo) start() {
   if f.running.Swap(true) {
-     // already running…
-     return
+    // already running…
+    return
   }
   // start the Foo
 }
 
 func (f *foo) isRunning() bool {
   return f.running.Load()
+}
+```
+
+</td></tr>
+</tbody></table>
+
+When every access is already an atomic function call,
+`atomictypes` does rewrite the primitive form.
+`go fix -json` on the bad column reports
+`var n int32 may be simplified using atomic.Int32`.
+
+<table>
+<thead><tr><th>Bad</th><th>Good</th></tr></thead>
+<tbody>
+<tr><td>
+
+```go
+import "sync/atomic"
+
+type foo struct {
+  n int32
+}
+
+func (f *foo) inc() {
+  atomic.AddInt32(&f.n, 1)
+}
+```
+
+</td><td>
+
+```go
+import "sync/atomic"
+
+type foo struct {
+  n atomic.Int32
+}
+
+func (f *foo) inc() {
+  f.n.Add(1)
 }
 ```
 
@@ -3385,8 +3487,59 @@ wantError := `unknown error:"test"`
 
 #### Use Field Names to Initialize Structs
 
-You should almost always specify field names when initializing structs. This is
-now enforced by [`go vet`](https://pkg.go.dev/cmd/vet).
+You should almost always specify field names when initializing structs.
+
+`go vet`'s `composites` check reports an unkeyed composite literal
+only when the struct type is imported from another package
+([`composites`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/composite)).
+`go vet` on the program below reports
+`net.DNSConfigError struct literal uses unkeyed fields`:
+
+```go
+_ = &net.DNSConfigError{err}
+```
+
+The same check does not report an unkeyed literal of a struct
+defined in the same package.
+`go vet` is silent on `User{"John", "Doe", true}` below.
+`go fix` does not run `composites`:
+some types should stay unkeyed
+(`src/cmd/vendor/golang.org/x/tools/go/analysis/suite/fix/fix.go`
+at tag `go1.27.3`).
+
+Keyed fields for a same-package struct are house judgment.
+Follow the keyed example even when `go vet`, `go fix`, and staticcheck
+are silent,
+except for the test-table case below.
+
+Go 1.27 allows a struct-literal key to be any field selector,
+not only a top-level field name
+([Go 1.27 release notes](https://go.dev/doc/go1.27#language),
+[issue #9859](https://go.dev/issue/9859)).
+The `embedlit` modernizer deletes a redundant embedded-field type.
+`go fix -json` on the bad literal reports
+`embedded field type can be removed from struct literal`
+([`embedlit`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize#embedlit)).
+This section does not require that nested form.
+A promoted field name is still a field name.
+
+<table>
+<thead><tr><th>Bad</th><th>Good</th></tr></thead>
+<tbody>
+<tr><td>
+
+```go
+return T{U: U{x: 1}}
+```
+
+</td><td>
+
+```go
+return T{x: 1}
+```
+
+</td></tr>
+</tbody></table>
 
 <table>
 <thead><tr><th>Bad</th><th>Good</th></tr></thead>
@@ -3895,19 +4048,47 @@ for multiple inputs/outputs to a system.
 
 #### Parallel Tests
 
-Parallel tests, like some specialized loops (for example, those that spawn
-goroutines or capture references as part of the loop body),
-must take care to explicitly assign loop variables within the loop's scope to
-ensure that they hold the expected values.
+Go 1.22 gives each iteration of a `for` statement its own loop variables
+([Go 1.22 release notes](https://go.dev/doc/go1.22#language),
+[spec](https://go.dev/ref/spec#Go_1.22)).
+The language paragraph in those notes does not cite an issue number.
+The change was previewed in Go 1.21
+([Go 1.21 release notes](https://go.dev/doc/go1.21#language),
+[issue #57969](https://go.dev/issue/57969)).
+
+A `t.Parallel` subtest uses the range variable directly.
+Do not redeclare it with `tt := tt`.
+The `forvar` modernizer in `go fix` deletes that redeclaration in a `range` loop.
+`go fix -json` on the bad column reports `copying variable is unneeded`
+([`forvar`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize#forvar)).
+`forvar` does not edit three-clause `for` loops.
+Table tests use `range`.
+
+Upstream deleted the redeclaration in
+[commit 0a69c1d0954093b0466ad9a1b95bbf7bef399793](https://github.com/uber-go/guide/commit/0a69c1d0954093b0466ad9a1b95bbf7bef399793)
+([#254](https://github.com/uber-go/guide/pull/254)).
+That pull request has no review comments.
+The sentences around the example still told readers to copy `tt`.
+Those sentences were the pre-1.22 rule.
+
+<table>
+<thead><tr><th>Bad</th><th>Good</th></tr></thead>
+<tbody>
+<tr><td>
 
 ```go
-tests := []struct{
-  give string
-  // ...
-}{
-  // ...
+for _, tt := range tests {
+  tt := tt
+  t.Run(tt.give, func(t *testing.T) {
+    t.Parallel()
+    // ...
+  })
 }
+```
 
+</td><td>
+
+```go
 for _, tt := range tests {
   t.Run(tt.give, func(t *testing.T) {
     t.Parallel()
@@ -3916,10 +4097,8 @@ for _, tt := range tests {
 }
 ```
 
-In the example above, we must declare a `tt` variable scoped to the loop
-iteration because of the use of `t.Parallel()` below.
-If we do not do that, most or all tests will receive an unexpected value for
-`tt`, or a value that changes as they're running.
+</td></tr>
+</tbody></table>
 
 <!-- TODO: Explain how to use _test packages. -->
 
@@ -4099,7 +4278,7 @@ quality without being unnecessarily prescriptive:
 
 We recommend [golangci-lint](https://github.com/golangci/golangci-lint) as the go-to lint runner for Go code, largely due
 to its performance in larger codebases and ability to configure and use many
-canonical linters at once. This repo has an example [.golangci.yml](https://github.com/uber-go/guide/blob/master/.golangci.yml) config file
+canonical linters at once. This repo has an example [.golangci.yml](src/.golangci.yml) config file
 with recommended linters and settings.
 
 golangci-lint has [various linters](https://golangci-lint.run/usage/linters/) available for use. The above linters are

@@ -33,7 +33,7 @@ recommended as a base set, and we encourage teams to add any additional linters
 that make sense for their projects.
 
   [golangci-lint]: https://github.com/golangci/golangci-lint
-  [.golangci.yml]: https://github.com/uber-go/guide/blob/master/.golangci.yml
+  [.golangci.yml]: .golangci.yml
   [various linters]: https://golangci-lint.run/usage/linters/
   [golint]: https://github.com/golang/lint
   
